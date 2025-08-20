@@ -1,3 +1,4 @@
+// BookmarkButton.tsx
 import { twMerge } from "tailwind-merge";
 import React from "react";
 import BookmarkIcon from "../icons/BookmarkIcon";
@@ -8,10 +9,9 @@ type BookmarkButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
 
 const BookmarkButton = React.forwardRef<HTMLButtonElement, BookmarkButtonProps>(
   ({ className, onClick, disabled, ...props }, ref) => (
-    <button 
+    <button
       className={twMerge(
         "bg-black/30 border border-white/30 rounded-full flex items-center justify-center cursor-pointer transition-colors w-12 h-12",
-        disabled ? "" : "",
         className
       )}
       ref={ref}
@@ -23,5 +23,7 @@ const BookmarkButton = React.forwardRef<HTMLButtonElement, BookmarkButtonProps>(
     </button>
   )
 );
+
+BookmarkButton.displayName = "BookmarkButton";
 
 export default BookmarkButton;
