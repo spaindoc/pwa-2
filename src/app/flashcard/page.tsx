@@ -2,11 +2,15 @@
 
 import Flashcards, { FlashcardsContent } from "@/components/Flashcards";
 import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 export default function FlashcardPage() {
   const [currentBgImage, setCurrentBgImage] = useState("");
+  const [activeIndex, setActiveIndex] = useState(0);
   const router = useRouter();
+
+  // Собираем ссылки на все видео-фоны по id карточки
+  const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
 
   const flashcards: FlashcardsContent[] = [
     {
@@ -23,7 +27,7 @@ export default function FlashcardPage() {
       title: "Strength You Can Trust",
       content:
         "Confidence that holds over time usually has real experiences behind it. These are the moments where you kept your composure, reset after a mistake, or competed with focus even when things were difficult. The way you respond in those situations shapes your sense of belief. Athletes often describe their strongest confidence as something they can trace back to effort, steadiness, or recovery. That kind of strength is worth paying attention to.",
-      backgroundImage: "/bg-video.mp4", 
+      backgroundImage: "/bg-video.mp4", // <-- этот слой должен звучать, когда активен
     },
     {
       id: "f3",
@@ -38,11 +42,13 @@ export default function FlashcardPage() {
   useEffect(() => {
     if (flashcards.length > 0) {
       setCurrentBgImage(flashcards[0].backgroundImage || "/video-bg.png");
+      setActiveIndex(0);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSlideChange = (index: number) => {
+    setActiveIndex(index);
     const newBg = flashcards[index]?.backgroundImage || "/video-bg.png";
     setCurrentBgImage(newBg);
   };
@@ -51,8 +57,61 @@ export default function FlashcardPage() {
     router.push("/quiz");
   };
 
-  // простая проверка — является ли src видео
   const isVideoSrc = (src: string) => /\.mp4$|\.webm$|\.ogg$/i.test(src ?? "");
+
+  // Включаем звук только на активном видео, остальные глушим/паузим
+  useEffect(() => {
+    const activeId = flashcards[activeIndex]?.id;
+    // Проходим по всем refs
+    Object.entries(videoRefs.current).forEach(([id, el]) => {
+      if (!el) return;
+
+      const makeMuted = () => {
+        el.muted = true;
+        el.defaultMuted = true;
+        el.setAttribute("muted", "");
+      };
+
+      if (id === activeId) {
+        // Активное: попытаться со звуком
+        try {
+          el.muted = false;
+          el.defaultMuted = false;
+          el.removeAttribute("muted");
+          el.volume = 1;
+          // на всякий случай перемотаем особых нужд нет: оставляем как есть
+          el.play().catch(() => {
+            // Автоплей со звуком запрещён (iOS/Safari) — fallback в muted
+            makeMuted();
+            el.play().catch(() => {
+              /* если даже в muted не стартует — ок, не рушим */
+            });
+          });
+        } catch {
+          makeMuted();
+        }
+      } else {
+        // Неактивные: точно тишина и лучше пауза
+        makeMuted();
+        el.pause();
+      }
+    });
+
+    // При деманте — стопаем всё
+    return () => {
+      Object.values(videoRefs.current).forEach((el) => {
+        try {
+          if (el) {
+            el.pause();
+            el.muted = true;
+            el.defaultMuted = true;
+            el.setAttribute("muted", "");
+          }
+        } catch {}
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeIndex, flashcards.length]);
 
   return (
     <div className='w-full h-full flex justify-center'>
@@ -61,7 +120,7 @@ export default function FlashcardPage() {
         <div className='absolute inset-0'>
           {flashcards.map((card) => {
             const src = card.backgroundImage || "/video-bg.png";
-            const active = src === currentBgImage;
+            const active = card.id === flashcards[activeIndex]?.id;
             const video = isVideoSrc(src);
 
             return (
@@ -74,9 +133,11 @@ export default function FlashcardPage() {
               >
                 {video ? (
                   <>
-                    {/* Само видео — блюрим его, чтобы не зависеть от поддержки backdrop-filter. 
-                        scale-110 убирает артефакты у краёв после blur */}
+                    {/* Видео-слой: по умолчанию muted (для автоплея), активному потом уберём muted в useEffect */}
                     <video
+                      ref={(el) => {
+                        videoRefs.current[card.id] = el;
+                      }}
                       className='absolute inset-0 w-full h-full object-cover filter blur-[10px] scale-110'
                       src={src}
                       autoPlay
@@ -84,7 +145,6 @@ export default function FlashcardPage() {
                       loop
                       playsInline
                     />
-                    {/* Лёгкая затемняющая вуаль сверху для читаемости контента */}
                     <div className='absolute inset-0 bg-black/30' />
                   </>
                 ) : (

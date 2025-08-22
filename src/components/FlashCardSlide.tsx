@@ -86,7 +86,7 @@ export default function FlashcardSlide({
               {card.content && <p className='text-white'>{card.content}</p>}
             </div>
 
-            <div className='flex justify-center'>
+            <div className='flex-col items-center justify-center'>
               <Timer timer={60} className='mx-auto' />
             </div>
           </div>
@@ -94,7 +94,7 @@ export default function FlashcardSlide({
 
         {card.type === "text" && (
           <div className='w-full h-full'>
-            <div className='flex flex-col mt-4 w-full space-y-4'>
+            <div className='flex flex-col mt-14 w-full space-y-4'>
               <Counter count={index} length={cardsLength} />
               {card.title && (
                 <h1 className='text-2xl font-medium text-white leading-tight'>
