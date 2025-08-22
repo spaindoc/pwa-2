@@ -1,11 +1,15 @@
 import { MetadataRoute } from 'next'
- 
+
+export const dynamic = 'force-dynamic'; 
+
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: 'Training Beat-2',
     short_name: 'TB-2',
     description: 'A Progressive Web App for athletes',
+    id: '/',
     start_url: '/',
+    scope: '/',
     display: 'standalone',
     background_color: '#ffffff',
     theme_color: '#ffffff',

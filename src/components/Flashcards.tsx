@@ -59,7 +59,6 @@ export default function Flashcards({
         modules={[Pagination, Mousewheel, Keyboard]}
         onSwiper={setSwiperInstance}
         onSlideChange={handleSlideChange}
-        onReachEnd={handleComplete}
         className='h-full'
         style={
           {
@@ -74,7 +73,7 @@ export default function Flashcards({
               card={card}
               isActive={index === currentCardIndex}
               index={index}
-              cardsLength={cards.length - 1} // последний индекс (как у тебя)
+              cardsLength={cards.length} // последний индекс (как у тебя)
               userInput={userInput}
               onUserInputChange={setUserInput}
               swiper={swiperInstance}

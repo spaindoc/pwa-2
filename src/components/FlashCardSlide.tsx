@@ -8,14 +8,14 @@ import BookmarkButton from "./ui/BookmarkButton";
 import TextArea from "./ui/TextArea";
 import Timer from "./Timer";
 import Swiper from "swiper";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Button from "./ui/Button";
+import { createPortal } from "react-dom";
 
 type FlashcardSlideProps = {
   card: FlashcardsContent;
   isActive: boolean;
   index: number;
-  /** сюда прилетает последний индекс (cards.length - 1) */
   cardsLength: number;
   userInput: string;
   onUserInputChange: (value: string) => void;
@@ -40,7 +40,21 @@ export default function FlashcardSlide({
     [card.type, userInput]
   );
   // так как cardsLength — последний индекс:
-  const isLastSlide = index === cardsLength;
+  const isLastSlide = index === cardsLength - 1;
+
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  // на всякий случай сверим активность слайдов и через prop, и через swiper
+  const isActiveNow = isActive || swiper?.activeIndex === index;
+
+  const handleSubmit = () => {
+    if (swiper && !isLastSlide) {
+      swiper.slideTo(index + 1, 300);
+    } else {
+      onComplete?.();
+    }
+  };
 
   return (
     <div className='h-full flex flex-col'>
@@ -115,30 +129,31 @@ export default function FlashcardSlide({
       </div>
 
       {/* свайп-подсказка только на первом */}
-      {index === 1 && (
+      {index === 0 && (
         <div className='flex justify-center mb-[4.125rem]'>
           <SwipeIcon />
         </div>
       )}
 
       {/* Кнопка Submit — идентично прошлой аппке */}
-      {card.type === "input" && isActive && hasTyped && (
-        <div className='fixed left-0 right-0 bottom-[calc(env(safe-area-inset-bottom)+18px)] z-30 px-4'>
-          <Button
-            onClick={() => {
-              if (isLastSlide) {
-                onComplete?.();
-              } else {
-                swiper?.slideNext();
-              }
-            }}
-            variant='button'
-            aria-label='Submit'
-          >
-            Submit
-          </Button>
-        </div>
-      )}
+      {card.type === "input" && hasTyped && isActiveNow && mounted
+        ? createPortal(
+            <div className='fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom,0px)+18px)] z-[1000]'>
+              {/* Внутренний контейнер c такими же границами, как у страницы */}
+              <div className='mx-auto w-full max-w-md px-4'>
+                <Button
+                  onClick={handleSubmit}
+                  variant='button'
+                  aria-label='Submit'
+                  className='w-full'
+                >
+                  Submit
+                </Button>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
 
       <BookmarkButton
         className='fixed z-30 bottom-[2.375rem] right-4'
