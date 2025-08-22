@@ -1,4 +1,4 @@
-"use client"
+"use client";
 
 import { useState } from "react";
 import AnswerOption from "./AnswerOption";
@@ -17,7 +17,11 @@ export type Question = {
 
 type QuestionCardProps = {
   question: Question;
-  onAnswered: (questionId: string, answerId: string, isCorrect: boolean) => void;
+  onAnswered: (
+    questionId: string,
+    answerId: string,
+    isCorrect: boolean
+  ) => void;
   className?: string;
   disabled?: boolean;
 };
@@ -33,7 +37,7 @@ export default function QuestionCard({
 
   const handleSelectAnswer = (answerId: string) => {
     if (isAnswered || disabled) return;
-    
+
     setSelectedAnswerId(answerId);
     const isCorrect = answerId === question.correctAnswerId;
     onAnswered(question.id, answerId, isCorrect);
@@ -41,15 +45,18 @@ export default function QuestionCard({
 
   return (
     <div className={`${className || ""}`}>
-      <h3 className="text-xl font-medium text-white mb-[1.875rem]">{question.text}</h3>
-      
-      <div className="space-y-3">
+      <h3 className='text-xl font-medium text-white mb-[1.875rem]'>
+        {question.text}
+      </h3>
+
+      <div className='space-y-3'>
         {question.answers.map((answer, index) => {
           const isSelected = selectedAnswerId === answer.id;
-          const isCorrect = isSelected && answer.id === question.correctAnswerId;
+          const isCorrect =
+            isSelected && answer.id === question.correctAnswerId;
           const isWrong = isSelected && answer.id !== question.correctAnswerId;
           const isOptionDisabled = (isAnswered && !isSelected) || disabled;
-          
+
           return (
             <AnswerOption
               key={answer.id}
