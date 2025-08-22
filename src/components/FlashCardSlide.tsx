@@ -50,7 +50,7 @@ export default function FlashcardSlide({
             swiper?.slidePrev();
           }
         }}
-        className='z-10 mt-[3.75rem] mb-6'
+        className='z-10 mt-[1.5rem] mb-6'
       />
 
       <div className='flex-1 flex flex-col justify-center items-center'>
@@ -80,7 +80,7 @@ export default function FlashcardSlide({
 
         {card.type === "text" && (
           <div className='w-full h-full'>
-            <div className='flex flex-col mt-24 w-full space-y-4'>
+            <div className='flex flex-col mt-4 w-full space-y-4'>
               <Counter count={index} length={cardsLength} />
               {card.title && (
                 <h1 className='text-2xl font-medium text-white leading-tight'>

@@ -34,7 +34,7 @@ export default function KnowledgeCheckPage() {
           style={{ backgroundImage: `url('/quiz-bg.png')` }}
         />
         
-        <div className="relative z-10 h-dvh px-4 pt-[3.75rem] pb-[3.125rem]">
+        <div className="relative z-10 h-dvh px-4 pt-[1.5rem] pb-[3.125rem]">
           <div className="h-full w-full flex flex-col">
             <Quiz 
               questions={questions} 

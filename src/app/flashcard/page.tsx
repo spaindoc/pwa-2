@@ -23,7 +23,7 @@ export default function FlashcardPage() {
       title: "Strength You Can Trust",
       content:
         "Confidence that holds over time usually has real experiences behind it. These are the moments where you kept your composure, reset after a mistake, or competed with focus even when things were difficult. The way you respond in those situations shapes your sense of belief. Athletes often describe their strongest confidence as something they can trace back to effort, steadiness, or recovery. That kind of strength is worth paying attention to.",
-      backgroundImage: "/bg-video.mp4", // ⬅️ это будет видео-фон
+      backgroundImage: "/bg-video.mp4", 
     },
     {
       id: "f3",

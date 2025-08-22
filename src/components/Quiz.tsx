@@ -323,10 +323,10 @@ export default function Quiz({
 
   if (isCompleted && !showFeedback) {
     return (
-      <section className={twMerge("flex flex-col flex-1 mt-6", className)}>
+      <section className={twMerge("flex flex-col flex-1 ", className)}>
         {/* Верхний поздравительный блок */}
         <motion.div
-          className='text-center mb-[3.75rem]'
+          className='text-center mb-[1.75rem]'
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.7, ease: EASE }}
