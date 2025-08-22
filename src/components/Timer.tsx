@@ -1,7 +1,8 @@
 // components/Timer.tsx
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import type React from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { gsap } from "gsap";
 import { twMerge } from "tailwind-merge";
 import StartButton from "./ui/StartButton";
@@ -45,6 +46,9 @@ const Timer: React.FC<TimerProps> = ({
   const [isComplete, setIsComplete] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [displaySeconds, setDisplaySeconds] = useState(0);
+  const [rotationCount, setRotationCount] = useState(0);
+  const [currentAngle, setCurrentAngle] = useState(-90); // Start at top
+  const [isTrailDisappearing, setIsTrailDisappearing] = useState(false);
 
   // Тайминг
   const startedAtRef = useRef<number | null>(null);
@@ -65,15 +69,43 @@ const Timer: React.FC<TimerProps> = ({
   const setProgressFrame = (elapsedMs: number) => {
     const totalMs = timer * 1000;
     const p = Math.min(1, Math.max(0, elapsedMs / totalMs));
-    if (progressCircleRef.current) {
-      const dashOffset = circumference * (1 - p);
-      gsap.set(progressCircleRef.current, { strokeDashoffset: dashOffset });
-    }
 
-    // Постоянная скорость: 90° за 5 сек → 18°/с
+    // Calculate dot position with constant speed: 90° per 5 seconds = 18°/sec
     const degPerSec = 18;
     const angleDeg = -90 + (elapsedMs / 1000) * degPerSec;
-    const angleRad = (angleDeg * Math.PI) / 180; // без модуля — никаких скачков
+    const angleRad = (angleDeg * Math.PI) / 180;
+
+    // Track rotations (every 360 degrees)
+    const currentRotations = Math.floor((angleDeg + 90) / 360);
+    const normalizedAngle = ((angleDeg + 90) % 360) - 90; // Keep angle between -90 and 270
+
+    setCurrentAngle(normalizedAngle);
+
+    if (currentRotations !== rotationCount) {
+      setRotationCount(currentRotations);
+    }
+
+    const shouldBeErasing = currentRotations % 2 === 1; // Odd rotations = erase, even = draw
+    setIsTrailDisappearing(shouldBeErasing);
+
+    const cycleProgress = (normalizedAngle + 90) / 360;
+
+    if (progressCircleRef.current) {
+      if (shouldBeErasing) {
+        gsap.set(progressCircleRef.current, {
+          strokeDasharray: `${circumference} ${circumference}`,
+          strokeDashoffset: circumference * cycleProgress,
+        });
+      } else {
+        const trailLength = circumference * cycleProgress;
+        gsap.set(progressCircleRef.current, {
+          strokeDasharray: `${trailLength} ${circumference}`,
+          strokeDashoffset: 0,
+        });
+      }
+    }
+
+    // Update dot position
     if (progressDotRef.current) {
       const cx = size / 2 + radius * Math.cos(angleRad);
       const cy = size / 2 + radius * Math.sin(angleRad);
@@ -93,7 +125,8 @@ const Timer: React.FC<TimerProps> = ({
     const maxR = radius * breathMaxRatio;
 
     // текущий радиус (если ещё не анимировался — будет minR)
-    const currentR = parseFloat(el.getAttribute("r") || "") || (minR as number);
+    const currentR =
+      Number.parseFloat(el.getAttribute("r") || "") || (minR as number);
     gsap.set(el, { attr: { r: currentR } });
 
     const tl = gsap.timeline({
@@ -107,12 +140,18 @@ const Timer: React.FC<TimerProps> = ({
     if (distToMax < distToMin) {
       tl.to(el, { attr: { r: minR }, duration: Math.max(0.1, exhaleSec) }).to(
         el,
-        { attr: { r: maxR }, duration: Math.max(0.1, inhaleSec) }
+        {
+          attr: { r: maxR },
+          duration: Math.max(0.1, inhaleSec),
+        }
       );
     } else {
       tl.to(el, { attr: { r: maxR }, duration: Math.max(0.1, inhaleSec) }).to(
         el,
-        { attr: { r: minR }, duration: Math.max(0.1, exhaleSec) }
+        {
+          attr: { r: minR },
+          duration: Math.max(0.1, exhaleSec),
+        }
       );
     }
 
@@ -225,6 +264,9 @@ const Timer: React.FC<TimerProps> = ({
     setIsComplete(false);
     setIsPaused(false);
     setIsRunning(true);
+    setRotationCount(0);
+    setCurrentAngle(-90);
+    setIsTrailDisappearing(false);
     // дыхание создастся в эффекте, если его нет
   };
 
@@ -283,6 +325,9 @@ const Timer: React.FC<TimerProps> = ({
     accumElapsedRef.current = 0;
     lastWholeSecRef.current = 0;
     setDisplaySeconds(0);
+    setRotationCount(0);
+    setCurrentAngle(-90);
+    setIsTrailDisappearing(false);
     killBreathTimeline();
 
     // прогресс/точка — в начало
@@ -311,10 +356,7 @@ const Timer: React.FC<TimerProps> = ({
 
   return (
     <>
-      <div
-        className={twMerge("block", className)}
-        style={{ width: size }}
-      >
+      <div className={twMerge("block", className)} style={{ width: size }}>
         {/* Фиксированная область круга */}
         <div className='relative' style={{ width: size, height: size }}>
           <svg width={size} height={size} className='block'>
@@ -439,7 +481,7 @@ const Timer: React.FC<TimerProps> = ({
         {/* нижние кнопки */}
       </div>
       {state !== "initial" && (
-        <div className='pointer-events-auto -mt-2 flex items-center justify-between gap-4 w-full'>
+        <div className='pointer-events-auto -mt-1 flex items-center justify-between gap-4 w-full'>
           {/* Стоп */}
           <button
             type='button'
@@ -495,7 +537,7 @@ const Timer: React.FC<TimerProps> = ({
               >
                 <circle cx='40' cy='40' r='40' fill='white' />
                 <path
-                  d='M37.4 51H32.6C32.1757 51 31.7687 50.8946 31.4686 50.7071C31.1686 50.5196 31 50.2652 31 50V30C31 29.7348 31.1686 29.4804 31.4686 29.2929C31.7687 29.1054 32.1757 29 32.6 29H37.4C37.8243 29 38.2313 29.1054 38.5314 29.2929C38.8314 29.4804 39 29.7348 39 30V50C39 50.2652 38.8314 50.5196 38.5314 50.7071C38.2313 50.8946 37.8243 51 37.4 51Z'
+                  d='M37.4 51H32.6C32.1757 51 31.7687 50.8946 31.4686 50.7071C31.1686 50.5196 31 50.2652 31 50V30C31 29.7348 31.1686 29.4804 31.4686 29.2929C31.7687 29.1054 32.1757 29 32.6 29H37.4C37.8243 29 38.2313 29.1054 38.5314 29.2929C38.8314 29.4804 39 29.7348 39 30V50C39 50.2652 38.8314 50.5196 38.5314 50.7071C38.2313 29.8946 37.8243 29 37.4 29Z'
                   fill='black'
                 />
                 <path
