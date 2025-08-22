@@ -3,18 +3,19 @@
 @theme {
   --color-white: #ffffff;
   --color-black: #000000;
-  --color-grey:  #8d8d8e;
+  --color-grey: #8d8d8e;
   --color-red: #f97066;
   --color-green: #b2ff8b;
   --color-orange: #e4782a;
-  --color-violet: #924AAB;
+  --color-violet: #924aab;
   --color-blue: #363391;
+  --font-dmSans: var(--font-dmSans);
 }
 
 body {
   background: var(--color-black);
   color: var(--color-white);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-dmSans);
 }
 
 .custom-scrollbar {

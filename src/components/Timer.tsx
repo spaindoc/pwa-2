@@ -1,242 +1,319 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { gsap } from 'gsap';
+// components/Timer.tsx
+"use client";
+
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { gsap } from "gsap";
 import { twMerge } from "tailwind-merge";
-import StartButton from './ui/StartButton';
+import StartButton from "./ui/StartButton";
 
 interface TimerProps {
-  timer: number; // Time in seconds
+  /** Общее время таймера в секундах */
+  timer: number;
+  /** Колбэк по завершении */
   onComplete?: () => void;
+  /** Класс контейнера */
   className?: string;
+  /** Полный цикл «вдох+выдох», сек. 0–T/2 — вдох, T/2–T — выдох */
+  breathCycleSec?: number; // по умолчанию 30
+  /** Границы «дыхания» в долях от радиуса дорожки */
+  breathMinRatio?: number; // 0.35 по умолчанию
+  breathMaxRatio?: number; // 0.55 по умолчанию
 }
 
-const Timer: React.FC<TimerProps> = ({ timer, onComplete, className }) => {
-  const [currentTime, setCurrentTime] = useState(0);
-  const [isRunning, setIsRunning] = useState(false);
-  const [isComplete, setIsComplete] = useState(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const progressCircleRef = useRef<SVGCircleElement>(null);
-  const progressDotRef = useRef<SVGCircleElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const timerContainerRef = useRef<HTMLDivElement>(null);
-  const isFirstRender = useRef(true);
-  const isAnimating = useRef(false);
-
+const Timer: React.FC<TimerProps> = ({
+  timer,
+  onComplete,
+  className,
+  breathCycleSec = 30,
+  breathMinRatio = 0.6,
+  breathMaxRatio = 0.9,
+}) => {
+  // -------- геометрия прогресс-кольца --------
   const size = 274;
   const strokeWidth = 10;
   const innerSize = 260;
   const radius = (innerSize - strokeWidth) / 2;
-  const circumference = radius * 2 * Math.PI;
+  const circumference = useMemo(() => radius * 2 * Math.PI, [radius]);
 
-  useEffect(() => {
-    if (isRunning && currentTime < timer) {
-      intervalRef.current = setInterval(() => {
-        setCurrentTime(prev => {
-          if (prev >= timer - 1) {
-            setIsRunning(false);
-            setIsComplete(true);
-            onComplete?.();
-            return timer;
-          }
-          return prev + 1;
-        });
-      }, 1000);
-    } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
+  // -------- refs --------
+  const progressCircleRef = useRef<SVGCircleElement | null>(null);
+  const progressDotRef = useRef<SVGCircleElement | null>(null);
+  const breathCircleRef = useRef<SVGCircleElement | null>(null);
+  const timerContainerRef = useRef<HTMLDivElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+
+  const breathTweenRef = useRef<gsap.core.Tween | null>(null);
+
+  // -------- состояние --------
+  const [isRunning, setIsRunning] = useState(false);
+  const [isComplete, setIsComplete] = useState(false);
+  const [displaySeconds, setDisplaySeconds] = useState(0);
+
+  // тайм-метки/служебные
+  const startedAtRef = useRef<number | null>(null);
+  const rafActiveRef = useRef(false);
+  const lastWholeSecRef = useRef(0);
+
+  // формат mm:ss
+  const mmss = useMemo(() => {
+    const m = Math.floor(displaySeconds / 60)
+      .toString()
+      .padStart(2, "0");
+    const s = (displaySeconds % 60).toString().padStart(2, "0");
+    return `${m}:${s}`;
+  }, [displaySeconds]);
+
+  // кадр прогресса (плавно по rAF)
+  const setProgressFrame = (elapsedMs: number) => {
+    const totalMs = timer * 1000;
+    const p = Math.min(1, Math.max(0, elapsedMs / totalMs)); // 0..1
+    const angleDeg = -90 + p * 360;
+    const angleRad = (angleDeg * Math.PI) / 180;
+
+    if (progressCircleRef.current) {
+      const dashOffset = circumference * (1 - p);
+      gsap.set(progressCircleRef.current, { strokeDashoffset: dashOffset });
     }
+    if (progressDotRef.current) {
+      const cx = size / 2 + radius * Math.cos(angleRad);
+      const cy = size / 2 + radius * Math.sin(angleRad);
+      gsap.set(progressDotRef.current, { cx, cy });
+    }
+  };
 
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, [isRunning, currentTime, timer, onComplete]);
+  // дыхание центрального круга: r между minR ↔ maxR
+  const ensureBreathTween = () => {
+    const el = breathCircleRef.current;
+    if (!el) return;
 
-  useEffect(() => {
-    if (progressCircleRef.current && progressDotRef.current) {
-      const progress = (currentTime / timer) * 100;
-      const strokeDashoffset = circumference - (progress / 100) * circumference;
-      const angle = (progress * 3.6 - 90) * Math.PI / 180;
-      const dotX = size / 2 + radius * Math.cos(angle);
-      const dotY = size / 2 + radius * Math.sin(angle);
+    const minR = radius * breathMinRatio;
+    const maxR = radius * breathMaxRatio;
 
-      gsap.to(progressCircleRef.current, {
-        strokeDashoffset: strokeDashoffset,
-        duration: 0.8,
-        ease: "power2.out"
+    breathTweenRef.current?.kill();
+    // поставить стартовый радиус
+    gsap.set(el, { attr: { r: minR } });
+
+    breathTweenRef.current = gsap.to(el, {
+      attr: { r: maxR },
+      duration: Math.max(0.1, breathCycleSec / 2),
+      ease: "power1.inOut",
+      yoyo: true,
+      repeat: -1,
+    });
+  };
+
+  const killBreathTween = () => {
+    const el = breathCircleRef.current;
+    breathTweenRef.current?.kill();
+    breathTweenRef.current = null;
+    if (el) {
+      // вернуть к «спокойному» состоянию
+      const calmR = radius * ((breathMinRatio + breathMaxRatio) / 2);
+      gsap.to(el, {
+        attr: { r: calmR },
+        duration: 0.35,
+        ease: "power2.out",
       });
-
-      gsap.to(progressDotRef.current, {
-        cx: dotX,
-        cy: dotY,
-        duration: 0.8,
-        ease: "power2.out"
-      });
     }
-    
-    if (isFirstRender.current && currentTime > 0) {
-      isFirstRender.current = false;
-    }
-  }, [currentTime, timer, circumference, radius, size]);
+  };
 
+  // основной тикер
   useEffect(() => {
-    if (timerContainerRef.current && isRunning && currentTime === 0) {
-      gsap.fromTo(timerContainerRef.current, 
-        { 
-          scale: 0.4,
-          opacity: 0,
-        },
-        {
-          scale: 1,
-          opacity: 1,
-          duration: 0.6,
-          ease: "back.out(1.7)"
-        }
+    if (!isRunning) return;
+
+    // входная анимация контейнера
+    if (timerContainerRef.current) {
+      gsap.fromTo(
+        timerContainerRef.current,
+        { scale: 0.94, opacity: 0 },
+        { scale: 1, opacity: 1, duration: 0.6, ease: "power3.out" }
       );
     }
-  }, [isRunning]);
 
-  const handleToggle = () => {
-    if (isAnimating.current) return;
-    
-    if (currentTime === 0 && !isRunning) {
-      if (buttonRef.current) {
-        isAnimating.current = true;
-        gsap.to(buttonRef.current, {
-          scale: 0.95,
-          duration: 0.1,
-          ease: "power2.out",
-          yoyo: true,
-          repeat: 1,
-          onComplete: () => {
-            gsap.set(buttonRef.current, { scale: 1 });
-            isAnimating.current = false;
-          }
-        });
-      }
-      setIsRunning(true);
+    // подготовка прогресс-окружности
+    if (progressCircleRef.current && progressDotRef.current) {
+      gsap.set(progressCircleRef.current, {
+        strokeDasharray: circumference,
+        strokeDashoffset: circumference,
+      });
+      gsap.fromTo(
+        progressDotRef.current,
+        { scale: 0.85 },
+        { scale: 1, duration: 0.6, ease: "power3.out" }
+      );
     }
+
+    // старт дыхания
+    ensureBreathTween();
+
+    startedAtRef.current = performance.now();
+    rafActiveRef.current = true;
+    lastWholeSecRef.current = 0;
+    setDisplaySeconds(0);
+
+    const tick = () => {
+      if (!rafActiveRef.current || startedAtRef.current == null) return;
+      const now = performance.now();
+      const elapsed = Math.min(now - startedAtRef.current, timer * 1000);
+
+      setProgressFrame(elapsed);
+
+      const whole = Math.floor(elapsed / 1000);
+      if (whole !== lastWholeSecRef.current) {
+        lastWholeSecRef.current = whole;
+        setDisplaySeconds(whole);
+      }
+
+      if (elapsed >= timer * 1000) {
+        rafActiveRef.current = false;
+        setIsRunning(false);
+        setIsComplete(true);
+        killBreathTween();
+        onComplete?.();
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+
+    const id = requestAnimationFrame(tick);
+    return () => {
+      rafActiveRef.current = false;
+      cancelAnimationFrame(id);
+      killBreathTween();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    isRunning,
+    timer,
+    breathCycleSec,
+    breathMinRatio,
+    breathMaxRatio,
+    circumference,
+  ]);
+
+  const handleStart = () => {
+    if (isRunning || isComplete) return;
+    if (buttonRef.current) {
+      gsap.to(buttonRef.current, {
+        scale: 0.96,
+        duration: 0.1,
+        yoyo: true,
+        repeat: 1,
+        ease: "power2.out",
+      });
+    }
+    setIsRunning(true);
   };
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const getState = () => {
-    if (currentTime === 0 && !isRunning) return 'initial';
-    if (isComplete) return 'complete';
-    if (isRunning) return 'running';
-    return 'paused';
-  };
-
-  const state = getState();
+  const state: "initial" | "running" | "complete" =
+    !isRunning && displaySeconds === 0
+      ? "initial"
+      : isComplete
+      ? "complete"
+      : "running";
 
   return (
-    <div 
-      className={twMerge("relative inline-block", className)} 
+    <div
+      className={twMerge("relative inline-block", className)}
       style={{ width: size, height: size }}
     >
-      <svg
-        width={size}
-        height={size}
-        className="block"
-      >
-        <defs>
-          <linearGradient id="progressGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#7766DA" />
-            <stop offset="100%" stopColor="#5241B7" />
-          </linearGradient>
-        </defs>
-
+      <svg width={size} height={size} className='block'>
+        {/* фон дорожки */}
         <circle
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          fill="none"
-          stroke="rgba(255, 255, 255, 0.3)"
+          fill='none'
+          stroke='rgba(255,255,255,0.28)'
           strokeWidth={strokeWidth}
         />
-        
-        {state !== 'initial' && (
+
+        {/* Градиенты */}
+        <defs>
+          {/* прогресс (фиолетовый как раньше) */}
+          <linearGradient
+            id='progressGradient'
+            x1='0%'
+            y1='0%'
+            x2='0%'
+            y2='100%'
+          >
+            <stop offset='0%' stopColor='#7766DA' />
+            <stop offset='100%' stopColor='#5241B7' />
+          </linearGradient>
+
+          {/* НОВЫЙ: градиент дыхающего круга (твой) */}
+          <linearGradient id='timerGradient' x1='0%' y1='0%' x2='100%' y2='0%'>
+            <stop offset='0%' stopColor='#60A5FA' /> {/* голубой */}
+            <stop offset='100%' stopColor='#1E40AF' /> {/* темно-синий */}
+          </linearGradient>
+        </defs>
+
+        {/* дыхание — внутренний круг с нужным градиентом */}
+        {state !== "initial" && (
+          <circle
+            ref={breathCircleRef}
+            cx={size / 2}
+            cy={size / 2}
+            r={radius * breathMinRatio}
+            fill='url(#timerGradient)'
+            opacity={0.95}
+          />
+        )}
+
+        {/* активный прогресс по окружности */}
+        {state !== "initial" && (
           <circle
             ref={progressCircleRef}
             cx={size / 2}
             cy={size / 2}
             r={radius}
-            fill="none"
-            stroke="url(#progressGradient)"
+            fill='none'
+            stroke='url(#progressGradient)'
             strokeWidth={strokeWidth}
             strokeDasharray={circumference}
             strokeDashoffset={circumference}
             transform={`rotate(-90 ${size / 2} ${size / 2})`}
-            strokeLinecap="round"
+            strokeLinecap='round'
           />
         )}
 
-        <g fill="#FFFFFF">
-          <rect 
-            x={size / 2 - 2} 
-            y={0} 
-            width="4" 
-            height="24" 
-            rx="2"
-          />
-          <rect 
-            x={size - 24} 
-            y={size / 2 - 2} 
-            width="24" 
-            height="4" 
-            rx="2"
-          />
-          <rect 
-            x={size / 2 - 2} 
-            y={size - 24} 
-            width="4" 
-            height="24" 
-            rx="2"
-          />
-          <rect 
-            x={0} 
-            y={size / 2 - 2} 
-            width="24" 
-            height="4" 
-            rx="2"
-          />
+        {/* метки-сектора (крест) */}
+        <g fill='#FFFFFF'>
+          <rect x={size / 2 - 2} y={0} width='4' height='24' rx='2' />
+          <rect x={size - 24} y={size / 2 - 2} width='24' height='4' rx='2' />
+          <rect x={size / 2 - 2} y={size - 24} width='4' height='24' rx='2' />
+          <rect x={0} y={size / 2 - 2} width='24' height='4' rx='2' />
         </g>
 
-        {state !== 'initial' && (
+        {/* бегущая точка */}
+        {state !== "initial" && (
           <circle
             ref={progressDotRef}
             cx={size / 2}
             cy={size / 2 - radius}
-            r="12"
-            fill="#FFFFFF"
+            r='12'
+            fill='#FFFFFF'
           />
         )}
       </svg>
 
-      <div 
+      {/* центр: текст поверх, НЕ масштабируется */}
+      <div
         ref={timerContainerRef}
-        className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"
+        className='absolute inset-0 flex items-center justify-center'
       >
-        {state === 'initial' ? (
-          <StartButton
-            ref={buttonRef}
-            onClick={handleToggle}
-          />
+        {state === "initial" ? (
+          <StartButton ref={buttonRef} onClick={handleStart} />
         ) : (
-          <button 
+          <button
             ref={buttonRef}
-            className="bg-white rounded-full flex items-center justify-center hover:bg-gray-50 transition-colors w-[180px] h-[180px]"
-            onClick={handleToggle}
+            type='button'
+            onClick={() => void 0}
+            className='bg-transparent rounded-full w-[180px] h-[180px] grid place-items-center select-none'
           >
-            <span 
-              className="text-black text-center font-['DM_Sans',sans-serif] text-[40px] leading-[52px] tracking-[2.23602px] font-bold"
-            >
-              {formatTime(currentTime)}
+            <span className="text-white text-center font-['DM_Sans',sans-serif] text-[40px] leading-[52px] tracking-[2.23602px] font-bold tabular-nums">
+              {mmss}
             </span>
           </button>
         )}

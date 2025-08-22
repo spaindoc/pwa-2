@@ -2,8 +2,9 @@ import { DM_Sans } from "next/font/google";
 import "./globals.css";
 
 const dmSans = DM_Sans({
-  variable: "--font-dm-sans",
+  weight: ["400", "500", "700"],
   subsets: ["latin"],
+  variable: "--font-dmSans",
 });
 
 export default function RootLayout({
@@ -12,13 +13,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body
-        className={`${dmSans.variable} antialiased`}
-      >
-        <main>
-          {children}
-        </main>
+    <html lang='en'>
+      <body className={`${dmSans.variable} antialiased`}>
+        <main>{children}</main>
       </body>
     </html>
   );
