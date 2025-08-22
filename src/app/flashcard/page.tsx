@@ -33,10 +33,6 @@ export default function FlashcardPage() {
         "Think about how you can return to that internal anchor the next time things feel uncertain. What does that version of you pay attention to? What needs to stay in focus?",
       backgroundImage: "/input-bg.png",
     },
-    {
-      id: "f4",
-      type: "text",
-    },
   ];
 
   useEffect(() => {
