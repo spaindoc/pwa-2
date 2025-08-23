@@ -1,4 +1,3 @@
-// components/Timer.tsx
 "use client";
 
 import type React from "react";
@@ -34,7 +33,8 @@ const Timer: React.FC<TimerProps> = ({
   const circumference = useMemo(() => radius * 2 * Math.PI, [radius]);
 
   // Refs
-  const progressCircleRef = useRef<SVGCircleElement | null>(null);
+  const progressCircleRef = useRef<SVGCircleElement | null>(null); // градиентный круг
+  const eraseMaskStrokeRef = useRef<SVGCircleElement | null>(null); // штрих в маске (вырезает)
   const progressDotRef = useRef<SVGCircleElement | null>(null);
   const breathCircleRef = useRef<SVGCircleElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
@@ -48,7 +48,6 @@ const Timer: React.FC<TimerProps> = ({
   const [displaySeconds, setDisplaySeconds] = useState(0);
   const [rotationCount, setRotationCount] = useState(0);
   const [currentAngle, setCurrentAngle] = useState(-90); // Start at top
-  const [isTrailDisappearing, setIsTrailDisappearing] = useState(false);
 
   // Тайминг
   const startedAtRef = useRef<number | null>(null);
@@ -65,47 +64,78 @@ const Timer: React.FC<TimerProps> = ({
     return `${m}:${s}`;
   }, [displaySeconds]);
 
-  // Кадр прогресса
+  // Кадр прогресса: чётные обороты — рисуем хвост, нечётные — маской «стираем» за точкой
   const setProgressFrame = (elapsedMs: number) => {
     const totalMs = timer * 1000;
-    const p = Math.min(1, Math.max(0, elapsedMs / totalMs));
+    const clamped = Math.min(elapsedMs, totalMs);
 
-    // Calculate dot position with constant speed: 90° per 5 seconds = 18°/sec
+    // 90° за 5с = 18°/с → полный круг за 20с
     const degPerSec = 18;
-    const angleDeg = -90 + (elapsedMs / 1000) * degPerSec;
+    const rotationPeriodMs = (360 / degPerSec) * 1000; // 20000 мс
+    const turn = Math.floor(clamped / rotationPeriodMs); // 0,1,2,...
+    const phase = (clamped % rotationPeriodMs) / rotationPeriodMs; // 0..1
+
+    const angleDeg = -90 + phase * 360;
     const angleRad = (angleDeg * Math.PI) / 180;
 
-    // Track rotations (every 360 degrees)
-    const currentRotations = Math.floor((angleDeg + 90) / 360);
-    const normalizedAngle = ((angleDeg + 90) % 360) - 90; // Keep angle between -90 and 270
+    if (turn !== rotationCount) setRotationCount(turn);
+    setCurrentAngle(((angleDeg + 90) % 360) - 90);
 
-    setCurrentAngle(normalizedAngle);
+    // Позиция конца сегмента у точки (вдоль длины контура)
+    const endPos = circumference * phase;
 
-    if (currentRotations !== rotationCount) {
-      setRotationCount(currentRotations);
-    }
+    // Небольшой EPS для артефактов на 0/1
+    const EPS = 0.0001;
 
-    const shouldBeErasing = currentRotations % 2 === 1; // Odd rotations = erase, even = draw
-    setIsTrailDisappearing(shouldBeErasing);
-
-    const cycleProgress = (normalizedAngle + 90) / 360;
+    const isDrawTurn = turn % 2 === 0; // 0-й, 2-й, ... — рисуем градиентный хвост
 
     if (progressCircleRef.current) {
-      if (shouldBeErasing) {
+      if (isDrawTurn) {
+        // === РИСУЕМ: градиентный "хвост" за точкой (растёт 0→C) ===
+        const visibleLen = Math.min(
+          circumference - EPS,
+          Math.max(EPS, phase * circumference)
+        );
+        let offset = (endPos - visibleLen) % circumference; // хвост за точкой
+        if (offset < 0) offset += circumference;
+
         gsap.set(progressCircleRef.current, {
-          strokeDasharray: `${circumference} ${circumference}`,
-          strokeDashoffset: circumference * cycleProgress,
+          strokeDasharray: `${visibleLen} ${circumference - visibleLen}`,
+          strokeDashoffset: offset,
         });
+
+        // Маска ничего не вырезает (чтобы не влиять на рисование)
+        if (eraseMaskStrokeRef.current) {
+          gsap.set(eraseMaskStrokeRef.current, {
+            strokeDasharray: `0 ${circumference}`,
+            strokeDashoffset: 0,
+          });
+        }
       } else {
-        const trailLength = circumference * cycleProgress;
+        // === СТИРАЕМ: градиентный круг полностью, маской вырезаем хвост за точкой ===
         gsap.set(progressCircleRef.current, {
-          strokeDasharray: `${trailLength} ${circumference}`,
+          strokeDasharray: `${circumference} 0`,
           strokeDashoffset: 0,
         });
+
+        if (eraseMaskStrokeRef.current) {
+          const eraseLen = Math.min(
+            circumference - EPS,
+            Math.max(EPS, phase * circumference)
+          );
+          let offset = (endPos - eraseLen - circumference / 4) % circumference; // хвост за точкой, сдвинутый на четверть вперед
+          if (offset < 0) offset += circumference;
+
+          // В маске чёрный цвет = «прозрачность» (скрыть градиент), белый = оставить
+          gsap.set(eraseMaskStrokeRef.current, {
+            strokeDasharray: `${eraseLen} ${circumference - eraseLen}`,
+            strokeDashoffset: offset,
+          });
+        }
       }
     }
 
-    // Update dot position
+    // Бегущая точка
     if (progressDotRef.current) {
       const cx = size / 2 + radius * Math.cos(angleRad);
       const cy = size / 2 + radius * Math.sin(angleRad);
@@ -113,18 +143,15 @@ const Timer: React.FC<TimerProps> = ({
     }
   };
 
-  // Дыхание — создать таймлайн только если его нет, стартовать с текущего r
+  // Дыхание — создать таймлайн только если его нет
   const ensureBreathTimeline = () => {
     const el = breathCircleRef.current;
     if (!el) return;
-
-    // если уже есть — ничего не делаем (важно для резюме!)
     if (breathTLRef.current) return;
 
     const minR = radius * breathMinRatio;
     const maxR = radius * breathMaxRatio;
 
-    // текущий радиус (если ещё не анимировался — будет minR)
     const currentR =
       Number.parseFloat(el.getAttribute("r") || "") || (minR as number);
     gsap.set(el, { attr: { r: currentR } });
@@ -133,7 +160,7 @@ const Timer: React.FC<TimerProps> = ({
       repeat: -1,
       defaults: { ease: "power1.inOut" },
     });
-    // идём к ближайшей «фазе»: если ближе к max — сначала вниз, иначе вверх
+
     const distToMax = Math.abs(currentR - maxR);
     const distToMin = Math.abs(currentR - minR);
 
@@ -159,21 +186,11 @@ const Timer: React.FC<TimerProps> = ({
     if (isPaused) tl.pause();
   };
 
-  const killBreathTimeline = () => {
-    const el = breathCircleRef.current;
-    breathTLRef.current?.kill();
-    breathTLRef.current = null;
-    if (el) {
-      const calmR = radius * ((breathMinRatio + breathMaxRatio) / 2);
-      gsap.to(el, { attr: { r: calmR }, duration: 0.35, ease: "power2.out" });
-    }
-  };
-
   // rAF-цикл
   useEffect(() => {
     if (!isRunning || isPaused) return;
 
-    // начальная анимация
+    // стартовая анимация
     if (overlayRef.current && displaySeconds === 0) {
       gsap.fromTo(
         overlayRef.current,
@@ -183,12 +200,18 @@ const Timer: React.FC<TimerProps> = ({
     }
     if (
       progressCircleRef.current &&
+      eraseMaskStrokeRef.current &&
       progressDotRef.current &&
       displaySeconds === 0
     ) {
+      // на старте — градиент пуст, маска ничего не вырезает
       gsap.set(progressCircleRef.current, {
-        strokeDasharray: circumference,
-        strokeDashoffset: circumference,
+        strokeDasharray: `0 ${circumference}`,
+        strokeDashoffset: 0,
+      });
+      gsap.set(eraseMaskStrokeRef.current, {
+        strokeDasharray: `0 ${circumference}`,
+        strokeDashoffset: 0,
       });
       gsap.fromTo(
         progressDotRef.current,
@@ -197,7 +220,6 @@ const Timer: React.FC<TimerProps> = ({
       );
     }
 
-    // создаём дыхание, если его нет (не пересоздаём на резюме)
     ensureBreathTimeline();
 
     startedAtRef.current = performance.now() - accumElapsedRef.current;
@@ -222,7 +244,8 @@ const Timer: React.FC<TimerProps> = ({
         setIsComplete(true);
         setIsPaused(false);
         accumElapsedRef.current = timer * 1000;
-        killBreathTimeline();
+        breathTLRef.current?.kill();
+        breathTLRef.current = null;
         onComplete?.();
         return;
       }
@@ -266,14 +289,11 @@ const Timer: React.FC<TimerProps> = ({
     setIsRunning(true);
     setRotationCount(0);
     setCurrentAngle(-90);
-    setIsTrailDisappearing(false);
-    // дыхание создастся в эффекте, если его нет
   };
 
   const handlePauseResume = () => {
     if (!isRunning) return;
     if (!isPaused) {
-      // Пауза
       setIsPaused(true);
       rafActiveRef.current = false;
       if (startedAtRef.current != null) {
@@ -285,7 +305,6 @@ const Timer: React.FC<TimerProps> = ({
       }
       breathTLRef.current?.pause();
     } else {
-      // Продолжить
       setIsPaused(false);
       startedAtRef.current = performance.now() - accumElapsedRef.current;
       rafActiveRef.current = true;
@@ -307,7 +326,8 @@ const Timer: React.FC<TimerProps> = ({
           setIsComplete(true);
           setIsPaused(false);
           accumElapsedRef.current = timer * 1000;
-          killBreathTimeline();
+          breathTLRef.current?.kill();
+          breathTLRef.current = null;
           onComplete?.();
           return;
         }
@@ -327,21 +347,36 @@ const Timer: React.FC<TimerProps> = ({
     setDisplaySeconds(0);
     setRotationCount(0);
     setCurrentAngle(-90);
-    setIsTrailDisappearing(false);
-    killBreathTimeline();
 
-    // прогресс/точка — в начало
+    // Сброс окружностей/маски
     if (progressCircleRef.current) {
       gsap.set(progressCircleRef.current, {
-        strokeDasharray: circumference,
-        strokeDashoffset: circumference,
+        strokeDasharray: `0 ${circumference}`,
+        strokeDashoffset: 0,
       });
     }
+    if (eraseMaskStrokeRef.current) {
+      gsap.set(eraseMaskStrokeRef.current, {
+        strokeDasharray: `0 ${circumference}`,
+        strokeDashoffset: 0,
+      });
+    }
+
+    // Точка в верх
     if (progressDotRef.current) {
       gsap.set(progressDotRef.current, {
         cx: size / 2,
         cy: size / 2 - radius,
       });
+    }
+
+    // Остановить дыхание и вернуть к спокойному радиусу
+    const el = breathCircleRef.current;
+    breathTLRef.current?.kill();
+    breathTLRef.current = null;
+    if (el) {
+      const calmR = radius * ((breathMinRatio + breathMaxRatio) / 2);
+      gsap.to(el, { attr: { r: calmR }, duration: 0.35, ease: "power2.out" });
     }
   };
 
@@ -360,7 +395,7 @@ const Timer: React.FC<TimerProps> = ({
         {/* Фиксированная область круга */}
         <div className='relative' style={{ width: size, height: size }}>
           <svg width={size} height={size} className='block'>
-            {/* фон дорожки */}
+            {/* фон дорожки (НА нём должно «появляться» стирание) */}
             <circle
               cx={size / 2}
               cy={size / 2}
@@ -370,7 +405,7 @@ const Timer: React.FC<TimerProps> = ({
               strokeWidth={strokeWidth}
             />
 
-            {/* градиенты */}
+            {/* градиенты + маска */}
             <defs>
               <linearGradient
                 id='progressGradient'
@@ -393,9 +428,32 @@ const Timer: React.FC<TimerProps> = ({
                 <stop offset='0%' stopColor='#60A5FA' />
                 <stop offset='100%' stopColor='#1E40AF' />
               </linearGradient>
+
+              {/* Маска, которая ВЫРЕЗАЕТ (делает прозрачным) участок градиента.
+                  Белое — оставить, чёрное — скрыть. */}
+              <mask
+                id='eraseMask'
+                maskUnits='userSpaceOnUse'
+                maskContentUnits='userSpaceOnUse'
+              >
+                <rect width={size} height={size} fill='white' />
+                <circle
+                  ref={eraseMaskStrokeRef}
+                  cx={size / 2}
+                  cy={size / 2}
+                  r={radius}
+                  fill='none'
+                  stroke='black'
+                  strokeWidth={strokeWidth}
+                  strokeDasharray={`0 ${circumference}`}
+                  strokeDashoffset={0}
+                  transform={`rotate(-90 ${size / 2} ${size / 2})`}
+                  strokeLinecap='butt'
+                />
+              </mask>
             </defs>
 
-            {/* дыхание */}
+            {/* дыхание — под штрихами */}
             {state !== "initial" && (
               <circle
                 ref={breathCircleRef}
@@ -407,7 +465,7 @@ const Timer: React.FC<TimerProps> = ({
               />
             )}
 
-            {/* активный прогресс */}
+            {/* ГРАДИЕНТНЫЙ круг (всегда под маской; на «рисовании» маска прозрачна) */}
             {state !== "initial" && (
               <circle
                 ref={progressCircleRef}
@@ -417,10 +475,11 @@ const Timer: React.FC<TimerProps> = ({
                 fill='none'
                 stroke='url(#progressGradient)'
                 strokeWidth={strokeWidth}
-                strokeDasharray={circumference}
-                strokeDashoffset={circumference}
+                strokeDasharray={`0 ${circumference}`}
+                strokeDashoffset={0}
                 transform={`rotate(-90 ${size / 2} ${size / 2})`}
                 strokeLinecap='round'
+                mask='url(#eraseMask)'
               />
             )}
 
@@ -477,9 +536,8 @@ const Timer: React.FC<TimerProps> = ({
             )}
           </div>
         </div>
-
-        {/* нижние кнопки */}
       </div>
+
       {state !== "initial" && (
         <div className='pointer-events-auto -mt-1 flex items-center justify-between gap-4 w-full'>
           {/* Стоп */}
@@ -537,11 +595,11 @@ const Timer: React.FC<TimerProps> = ({
               >
                 <circle cx='40' cy='40' r='40' fill='white' />
                 <path
-                  d='M37.4 51H32.6C32.1757 51 31.7687 50.8946 31.4686 50.7071C31.1686 50.5196 31 50.2652 31 50V30C31 29.7348 31.1686 29.4804 31.4686 29.2929C31.7687 29.1054 32.1757 29 32.6 29H37.4C37.8243 29 38.2313 29.1054 38.5314 29.2929C38.8314 29.4804 39 29.7348 39 30V50C39 50.2652 38.8314 50.5196 38.5314 50.7071C38.2313 29.8946 37.8243 29 37.4 29Z'
+                  d='M37.4 51H32.6C32.1757 51 31.7687 50.8946 31.4686 50.7071C31.1686 50.5196 31 50.2652 31 50V30C31 29.7348 31.1686 29.4804 31.4686 29.2929C31.7687 29.1054 32.1757 29 32.6 29H37.4C37.8243 29 38.2313 29.1054 38.5314 29.2929C38.8314 29.4804 39 29.7348 39 30V50C39 50.2652 38.8314 50.5196 38.5314 50.7071C38.2313 50.8946 37.8243 51 37.4 51Z'
                   fill='black'
                 />
                 <path
-                  d='M47.4 51H42.6C42.1757 51 41.7687 50.8946 41.4686 50.7071C41.1686 50.5196 41 50.2652 41 50V30C41 29.7348 41.1686 29.4804 41.4686 29.2929C41.7687 29.1054 42.1757 29 42.6 29H47.4C47.8243 29 48.2313 29.1054 48.5314 29.2929C48.8314 29.4804 49 29.7348 49 30V50C49 50.2652 48.8314 50.5196 48.5314 50.7071C48.2313 50.8946 47.8243 51 47.4 51Z'
+                  d='M47.4 51H42.6C42.1757 51 41.7687 50.8946 41.4686 50.7071C41.1686 50.5196 41 50.2652 41 50V30C31 29.7348 41.1686 29.4804 41.4686 29.2929C41.7687 29.1054 42.1757 29 42.6 29H47.4C47.8243 29 48.2313 29.1054 48.5314 29.2929C48.8314 29.4804 49 29.7348 49 30V50C49 50.2652 48.8314 50.5196 48.5314 50.7071C48.2313 50.8946 47.8243 51 47.4 51Z'
                   fill='black'
                 />
               </svg>
