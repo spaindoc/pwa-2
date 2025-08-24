@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import QuestionCard, { Question } from "./QuestionCard";
 import Button from "./ui/Button";
 import ChatIcon from "./icons/ChatIcon";
@@ -22,7 +22,6 @@ import {
 } from "framer-motion";
 
 const EASE = cubicBezier(0.22, 1, 0.36, 1);
-const SHEET_NAME = "PWA-2";
 
 function getErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
@@ -33,6 +32,7 @@ function getErrorMessage(err: unknown): string {
     return "Unknown error";
   }
 }
+
 type QuizProps = {
   questions: Question[];
   onComplete?: (score: number, totalQuestions: number) => void;
@@ -59,6 +59,25 @@ export default function Quiz({
   const [showToast, setShowToast] = useState(false);
 
   const router = useRouter();
+
+  // ---------- Success sound ----------
+  const successAudioRef = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => {
+    const a = new Audio("/success.mp3");
+    a.preload = "auto";
+    a.volume = 0.8; // мягкий звук
+    // iOS inline
+    // @ts-expect-error playsInline not in TS defs for HTMLAudioElement
+    a.playsInline = true;
+    successAudioRef.current = a;
+    return () => {
+      if (successAudioRef.current) {
+        successAudioRef.current.pause();
+        successAudioRef.current.src = ""; // освободить ресурс
+        successAudioRef.current = null;
+      }
+    };
+  }, []);
 
   const currentQuestionId = questions[currentQuestionIndex]?.id;
   const isCurrentQuestionAnswered = currentQuestionId
@@ -115,7 +134,6 @@ export default function Quiz({
         body: JSON.stringify({
           rating,
           feedback: feedbackText,
-          sheet: SHEET_NAME,
           meta: {
             correctAnswers,
             totalQuestions: questions.length,
@@ -125,7 +143,6 @@ export default function Quiz({
       });
 
       if (!res.ok) {
-        // попытаться прочитать сообщение от API, но без any
         let apiMessage = "";
         try {
           const data: unknown = await res.json();
@@ -182,11 +199,12 @@ export default function Quiz({
     return () => ctrl.stop();
   }, [isCompleted, showFeedback, daysMV]);
 
-  // HITE card numbers (staggered count ups)
-  const HITE_TARGET = 1335;
-  const hiteMV = useMotionValue(0);
-  const [hiteVal, setHiteVal] = useState(0);
+  // ---------- HITE SCORE ----------
+  const HITE_BASE = 915; // стартовое значение
+  const hiteMV = useMotionValue(0); // приращение к базе
+  const [hiteDeltaVal, setHiteDeltaVal] = useState(0);
 
+  // строки начислений
   const completedMV = useMotionValue(0);
   const [completedVal, setCompletedVal] = useState(0);
 
@@ -194,24 +212,28 @@ export default function Quiz({
   const [streakVal, setStreakVal] = useState(0);
 
   const correctMV = useMotionValue(0);
-  const [correctVal, setCorrectVal] = useState(0);
+  const [correctRowVal, setCorrectRowVal] = useState(0);
 
   const totalTarget = 100 + 7 + (allCorrect ? 15 : 0);
   const totalMV = useMotionValue(0);
   const [totalVal, setTotalVal] = useState(0);
 
+  // XP badge с анимируемой сменой
+  const [xpLevel, setXpLevel] = useState<"Rookie" | "Starter">("Rookie");
+
+  // подписки
   useEffect(() => {
-    const u1 = hiteMV.on("change", (v) => setHiteVal(Math.round(v)));
-    const u2 = completedMV.on("change", (v) => setCompletedVal(Math.round(v)));
-    const u3 = streakMV.on("change", (v) => setStreakVal(Math.round(v)));
-    const u4 = correctMV.on("change", (v) => setCorrectVal(Math.round(v)));
-    const u5 = totalMV.on("change", (v) => setTotalVal(Math.round(v)));
+    const uH = hiteMV.on("change", (v) => setHiteDeltaVal(Math.round(v)));
+    const u1 = completedMV.on("change", (v) => setCompletedVal(Math.round(v)));
+    const u2 = streakMV.on("change", (v) => setStreakVal(Math.round(v)));
+    const u3 = correctMV.on("change", (v) => setCorrectRowVal(Math.round(v)));
+    const u4 = totalMV.on("change", (v) => setTotalVal(Math.round(v)));
     return () => {
+      uH();
       u1();
       u2();
       u3();
       u4();
-      u5();
     };
   }, [hiteMV, completedMV, streakMV, correctMV, totalMV]);
 
@@ -226,6 +248,7 @@ export default function Quiz({
     streakMV.set(0);
     correctMV.set(0);
     totalMV.set(0);
+    setXpLevel("Rookie");
 
     const ctrls: { stop: () => void }[] = [];
 
@@ -247,7 +270,7 @@ export default function Quiz({
       })
     );
 
-    // Correct (если все верно): 0 -> 15
+    // Correct Knowledge Check Answer: 0 -> 15 только если все верно
     if (allCorrect) {
       ctrls.push(
         animate(correctMV, [0, 15], {
@@ -267,16 +290,35 @@ export default function Quiz({
       })
     );
 
-    // HITE Score: 0 -> 1335
+    // HITE приращение: 0 -> totalTarget; по завершении меняем бейдж
     ctrls.push(
-      animate(hiteMV, [0, HITE_TARGET], {
+      animate(hiteMV, [0, totalTarget], {
         duration: 1.6,
         ease: EASE,
         delay: baseDelay + (allCorrect ? 2.4 : 1.9),
+        onComplete: () => setXpLevel("Starter"),
       })
     );
 
-    return () => ctrls.forEach((c) => c.stop());
+    // 🔊 Звук успеха — после появления экрана “You Did It!” (чуть позже, чтобы не перебивать анимации)
+    const soundTimer = setTimeout(() => {
+      const a = successAudioRef.current;
+      if (a) {
+        try {
+          a.currentTime = 0;
+          a.play().catch(() => {
+            // автоплей может быть заблокирован — молча игнорируем
+          });
+        } catch {
+          /* noop */
+        }
+      }
+    }, (baseDelay + 0.6) * 1000); // синхронизировано с первыми анимациями заголовка
+
+    return () => {
+      ctrls.forEach((c) => c.stop());
+      clearTimeout(soundTimer);
+    };
   }, [
     isCompleted,
     showFeedback,
@@ -323,10 +365,10 @@ export default function Quiz({
 
   if (isCompleted && !showFeedback) {
     return (
-      <section className={twMerge("flex flex-col flex-1 ", className)}>
+      <section className={twMerge("flex flex-col flex-1 mt-6", className)}>
         {/* Верхний поздравительный блок */}
         <motion.div
-          className='text-center mb-[1.75rem]'
+          className='text-center mb-[3.75rem]'
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.7, ease: EASE }}
@@ -473,8 +515,26 @@ export default function Quiz({
               <div className='flex items-center gap-1.5'>
                 <HITEIcon />
                 <span className='font-medium text-lg'>HITE Score</span>
-                <div className='font-medium text-[10px] px-1.5 py-1 bg-blue rounded-4xl text-green'>
-                  🌱 Trainee
+
+                {/* === XP BADGE with animated switch === */}
+                <div className='font-medium text-[10px] rounded-4xl'>
+                  <AnimatePresence mode='wait' initial={false}>
+                    <motion.span
+                      key={xpLevel}
+                      initial={{ opacity: 0, y: 6, scale: 0.95, rotateX: -40 }}
+                      animate={{ opacity: 1, y: 0, scale: 1, rotateX: 0 }}
+                      exit={{ opacity: 0, y: -6, scale: 0.95, rotateX: 40 }}
+                      transition={{ duration: 0.35, ease: EASE }}
+                      className='inline-flex items-center gap-1 px-2 py-1 rounded-4xl'
+                      style={{
+                        backgroundColor:
+                          xpLevel === "Rookie" ? "#363391" : "#924AAB",
+                        color: xpLevel === "Rookie" ? "#B2FF8B" : "#FFFF00",
+                      }}
+                    >
+                      {xpLevel === "Rookie" ? "🌱 Rookie" : "🐤 Starter"}
+                    </motion.span>
+                  </AnimatePresence>
                 </div>
               </div>
 
@@ -484,7 +544,7 @@ export default function Quiz({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, ease: EASE, delay: 0.5 }}
               >
-                {hiteVal.toLocaleString()}
+                {(HITE_BASE + hiteDeltaVal).toLocaleString()}
               </motion.span>
             </div>
 
@@ -527,7 +587,7 @@ export default function Quiz({
                 <span className='tabular-nums'>+{streakVal}</span>
               </motion.div>
 
-              {allCorrect && (
+              {allCorrect ? (
                 <motion.div
                   variants={{
                     hidden: { opacity: 0, y: 8 },
@@ -542,7 +602,24 @@ export default function Quiz({
                   <span className='text-white/80'>
                     Correct Knowledge Check Answer
                   </span>
-                  <span className='tabular-nums'>+{correctVal}</span>
+                  <span className='tabular-nums'>+{correctRowVal}</span>
+                </motion.div>
+              ) : (
+                <motion.div
+                  variants={{
+                    hidden: { opacity: 0, y: 8 },
+                    show: {
+                      opacity: 1,
+                      y: 0,
+                      transition: { duration: 0.6, ease: EASE },
+                    },
+                  }}
+                  className='flex flex-row justify-between'
+                >
+                  <span className='text-white/80'>
+                    incorrect Knowledge Check Answer
+                  </span>
+                  <span className='tabular-nums'>+0</span>
                 </motion.div>
               )}
             </motion.div>

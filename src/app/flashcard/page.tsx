@@ -133,7 +133,6 @@ export default function FlashcardPage() {
               >
                 {video ? (
                   <>
-                    {/* Видео-слой: по умолчанию muted (для автоплея), активному потом уберём muted в useEffect */}
                     <video
                       ref={(el) => {
                         videoRefs.current[card.id] = el;
@@ -145,7 +144,14 @@ export default function FlashcardPage() {
                       loop
                       playsInline
                     />
-                    <div className='absolute inset-0 bg-black/30' />
+                    {/* было: <div className='absolute inset-0 bg-black/30' /> */}
+                    <div
+                      className={`absolute inset-0 ${
+                        card.id === "f2" && active
+                          ? "bg-black/50"
+                          : "bg-black/30"
+                      }`}
+                    />
                   </>
                 ) : (
                   <div

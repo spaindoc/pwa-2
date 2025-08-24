@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Swiper, SwiperSlide } from "swiper/react";
 import { Pagination, Mousewheel, Keyboard } from "swiper/modules";
 import type { Swiper as SwiperType } from "swiper";
@@ -37,9 +37,78 @@ export default function Flashcards({
   const [userInput, setUserInput] = useState("");
   const [swiperInstance, setSwiperInstance] = useState<SwiperType | null>(null);
 
+  // ===== swipe SFX =====
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const sfxRef = useRef<HTMLAudioElement | null>(null);
+  const audioUnlockedRef = useRef(false);
+  const skipFirstSlideChangeRef = useRef(true);
+
+  useEffect(() => {
+    const a = new Audio("/swipe.mp3");
+    a.preload = "auto";
+    a.volume = 0.45;
+    sfxRef.current = a;
+    return () => {
+      try {
+        sfxRef.current?.pause();
+      } catch {}
+      sfxRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const root = containerRef.current;
+    if (!root) return;
+
+    const unlockOnce = async () => {
+      if (audioUnlockedRef.current || !sfxRef.current) return;
+      try {
+        sfxRef.current.muted = true;
+        await sfxRef.current.play();
+        sfxRef.current.pause();
+        sfxRef.current.currentTime = 0;
+        sfxRef.current.muted = false;
+        audioUnlockedRef.current = true;
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const onPointerDown = () => unlockOnce();
+    const onWheel = () => unlockOnce();
+    const onKeyDown = () => unlockOnce();
+
+    root.addEventListener("pointerdown", onPointerDown, { passive: true });
+    root.addEventListener("wheel", onWheel, { passive: true });
+    root.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      root.removeEventListener("pointerdown", onPointerDown);
+      root.removeEventListener("wheel", onWheel);
+      root.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
+
+  const playSwipeSfx = () => {
+    const a = sfxRef.current;
+    if (!a) return;
+    try {
+      a.currentTime = 0;
+      void a.play().catch(() => {});
+    } catch {
+      /* ignore */
+    }
+  };
+
   const handleSlideChange = (swiper: SwiperType) => {
     setCurrentCardIndex(swiper.activeIndex);
     onSlideChange?.(swiper.activeIndex);
+
+    if (skipFirstSlideChangeRef.current) {
+      skipFirstSlideChangeRef.current = false;
+      return;
+    }
+    playSwipeSfx();
   };
 
   const handleComplete = () => {
@@ -49,7 +118,11 @@ export default function Flashcards({
   if (!cards.length) return null;
 
   return (
-    <section className={twMerge("h-full", className)}>
+    <section
+      ref={containerRef}
+      className={twMerge("h-full outline-none", className)}
+      tabIndex={0} // чтобы ловить keydown для разблокировки звука
+    >
       <Swiper
         direction='vertical'
         slidesPerView={1}
@@ -73,11 +146,11 @@ export default function Flashcards({
               card={card}
               isActive={index === currentCardIndex}
               index={index}
-              cardsLength={cards.length} // последний индекс (как у тебя)
+              cardsLength={cards.length}
               userInput={userInput}
               onUserInputChange={setUserInput}
               swiper={swiperInstance}
-              onComplete={onComplete}
+              onComplete={handleComplete}
             />
           </SwiperSlide>
         ))}

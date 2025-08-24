@@ -41,6 +41,49 @@ const Timer: React.FC<TimerProps> = ({
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const breathTLRef = useRef<gsap.core.Timeline | null>(null);
 
+  // ===== SFX (ding) =====
+  const dingRef = useRef<HTMLAudioElement | null>(null);
+  const dingUnlockedRef = useRef(false);
+
+  useEffect(() => {
+    const a = new Audio("/ding.mp3"); // положи файл в /public/ding.mp3
+    a.preload = "auto";
+    a.volume = 0.8;
+    dingRef.current = a;
+    return () => {
+      try {
+        dingRef.current?.pause();
+      } catch {}
+      dingRef.current = null;
+    };
+  }, []);
+
+  const unlockDing = async () => {
+    const a = dingRef.current;
+    if (!a || dingUnlockedRef.current) return;
+    try {
+      a.muted = true;
+      await a.play();
+      a.pause();
+      a.currentTime = 0;
+      a.muted = false;
+      dingUnlockedRef.current = true;
+    } catch {
+      // игнор — попробуем на следующем жесте
+    }
+  };
+
+  const playDing = () => {
+    const a = dingRef.current;
+    if (!a) return;
+    try {
+      a.currentTime = 0;
+      void a.play().catch(() => {});
+    } catch {
+      /* ignore */
+    }
+  };
+
   // State
   const [isRunning, setIsRunning] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
@@ -64,7 +107,7 @@ const Timer: React.FC<TimerProps> = ({
     return `${m}:${s}`;
   }, [displaySeconds]);
 
-  // Кадр прогресса: чётные обороты — рисуем хвост, нечётные — маской «стираем» за точкой
+  // Кадр прогресса
   const setProgressFrame = (elapsedMs: number) => {
     const totalMs = timer * 1000;
     const clamped = Math.min(elapsedMs, totalMs);
@@ -81,22 +124,17 @@ const Timer: React.FC<TimerProps> = ({
     if (turn !== rotationCount) setRotationCount(turn);
     setCurrentAngle(((angleDeg + 90) % 360) - 90);
 
-    // Позиция конца сегмента у точки (вдоль длины контура)
     const endPos = circumference * phase;
-
-    // Небольшой EPS для артефактов на 0/1
     const EPS = 0.0001;
-
-    const isDrawTurn = turn % 2 === 0; // 0-й, 2-й, ... — рисуем градиентный хвост
+    const isDrawTurn = turn % 2 === 0;
 
     if (progressCircleRef.current) {
       if (isDrawTurn) {
-        // === РИСУЕМ: градиентный "хвост" за точкой (растёт 0→C) ===
         const visibleLen = Math.min(
           circumference - EPS,
           Math.max(EPS, phase * circumference)
         );
-        let offset = (endPos - visibleLen) % circumference; // хвост за точкой
+        let offset = (endPos - visibleLen) % circumference;
         if (offset < 0) offset += circumference;
 
         gsap.set(progressCircleRef.current, {
@@ -104,7 +142,6 @@ const Timer: React.FC<TimerProps> = ({
           strokeDashoffset: offset,
         });
 
-        // Маска ничего не вырезает (чтобы не влиять на рисование)
         if (eraseMaskStrokeRef.current) {
           gsap.set(eraseMaskStrokeRef.current, {
             strokeDasharray: `0 ${circumference}`,
@@ -112,7 +149,6 @@ const Timer: React.FC<TimerProps> = ({
           });
         }
       } else {
-        // === СТИРАЕМ: градиентный круг полностью, маской вырезаем хвост за точкой ===
         gsap.set(progressCircleRef.current, {
           strokeDasharray: `${circumference} 0`,
           strokeDashoffset: 0,
@@ -123,10 +159,9 @@ const Timer: React.FC<TimerProps> = ({
             circumference - EPS,
             Math.max(EPS, phase * circumference)
           );
-          let offset = (endPos - eraseLen - circumference / 4) % circumference; // хвост за точкой, сдвинутый на четверть вперед
+          let offset = (endPos - eraseLen - circumference / 4) % circumference;
           if (offset < 0) offset += circumference;
 
-          // В маске чёрный цвет = «прозрачность» (скрыть градиент), белый = оставить
           gsap.set(eraseMaskStrokeRef.current, {
             strokeDasharray: `${eraseLen} ${circumference - eraseLen}`,
             strokeDashoffset: offset,
@@ -135,7 +170,6 @@ const Timer: React.FC<TimerProps> = ({
       }
     }
 
-    // Бегущая точка
     if (progressDotRef.current) {
       const cx = size / 2 + radius * Math.cos(angleRad);
       const cy = size / 2 + radius * Math.sin(angleRad);
@@ -204,7 +238,6 @@ const Timer: React.FC<TimerProps> = ({
       progressDotRef.current &&
       displaySeconds === 0
     ) {
-      // на старте — градиент пуст, маска ничего не вырезает
       gsap.set(progressCircleRef.current, {
         strokeDasharray: `0 ${circumference}`,
         strokeDashoffset: 0,
@@ -246,6 +279,10 @@ const Timer: React.FC<TimerProps> = ({
         accumElapsedRef.current = timer * 1000;
         breathTLRef.current?.kill();
         breathTLRef.current = null;
+
+        // === DING ===
+        playDing();
+
         onComplete?.();
         return;
       }
@@ -271,6 +308,9 @@ const Timer: React.FC<TimerProps> = ({
 
   // Кнопки
   const handleStart = () => {
+    // разблокируем звук по юзер-жесту
+    void unlockDing();
+
     if (isRunning || isComplete) return;
     if (buttonRef.current) {
       gsap.to(buttonRef.current, {
@@ -292,6 +332,9 @@ const Timer: React.FC<TimerProps> = ({
   };
 
   const handlePauseResume = () => {
+    // подстраховка: разблокируем тоже
+    void unlockDing();
+
     if (!isRunning) return;
     if (!isPaused) {
       setIsPaused(true);
@@ -328,6 +371,10 @@ const Timer: React.FC<TimerProps> = ({
           accumElapsedRef.current = timer * 1000;
           breathTLRef.current?.kill();
           breathTLRef.current = null;
+
+          // === DING ===
+          playDing();
+
           onComplete?.();
           return;
         }
@@ -338,6 +385,9 @@ const Timer: React.FC<TimerProps> = ({
   };
 
   const handleStop = () => {
+    // на всякий случай разблокировать тоже можно
+    void unlockDing();
+
     rafActiveRef.current = false;
     setIsRunning(false);
     setIsPaused(false);
@@ -395,7 +445,7 @@ const Timer: React.FC<TimerProps> = ({
         {/* Фиксированная область круга */}
         <div className='relative' style={{ width: size, height: size }}>
           <svg width={size} height={size} className='block'>
-            {/* фон дорожки (НА нём должно «появляться» стирание) */}
+            {/* фон дорожки */}
             <circle
               cx={size / 2}
               cy={size / 2}
@@ -429,8 +479,6 @@ const Timer: React.FC<TimerProps> = ({
                 <stop offset='100%' stopColor='#1E40AF' />
               </linearGradient>
 
-              {/* Маска, которая ВЫРЕЗАЕТ (делает прозрачным) участок градиента.
-                  Белое — оставить, чёрное — скрыть. */}
               <mask
                 id='eraseMask'
                 maskUnits='userSpaceOnUse'
@@ -453,7 +501,7 @@ const Timer: React.FC<TimerProps> = ({
               </mask>
             </defs>
 
-            {/* дыхание — под штрихами */}
+            {/* дыхание */}
             {state !== "initial" && (
               <circle
                 ref={breathCircleRef}
@@ -465,7 +513,7 @@ const Timer: React.FC<TimerProps> = ({
               />
             )}
 
-            {/* ГРАДИЕНТНЫЙ круг (всегда под маской; на «рисовании» маска прозрачна) */}
+            {/* прогресс под маской */}
             {state !== "initial" && (
               <circle
                 ref={progressCircleRef}

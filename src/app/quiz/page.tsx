@@ -13,7 +13,7 @@ export default function KnowledgeCheckPage() {
         { id: "a2", text: "Trusting the work you've put in" },
         { id: "a3", text: "Focusing on what others think" },
       ],
-      correctAnswerId: "a3",
+      correctAnswerId: "a2",
     }
   ];
 

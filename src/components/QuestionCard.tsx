@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import AnswerOption from "./AnswerOption";
 
 export type Answer = {
@@ -33,7 +33,15 @@ export default function QuestionCard({
   disabled = false,
 }: QuestionCardProps) {
   const [selectedAnswerId, setSelectedAnswerId] = useState<string | null>(null);
+  const [revealCorrect, setRevealCorrect] = useState(false);
+
   const isAnswered = selectedAnswerId !== null;
+
+  // сбрасываем состояние при смене вопроса
+  useEffect(() => {
+    setSelectedAnswerId(null);
+    setRevealCorrect(false);
+  }, [question.id]);
 
   const handleSelectAnswer = (answerId: string) => {
     if (isAnswered || disabled) return;
@@ -41,6 +49,11 @@ export default function QuestionCard({
     setSelectedAnswerId(answerId);
     const isCorrect = answerId === question.correctAnswerId;
     onAnswered(question.id, answerId, isCorrect);
+
+    // если неверно — подсветим правильный вариант чуть позже
+    if (!isCorrect) {
+      setTimeout(() => setRevealCorrect(true), 500);
+    }
   };
 
   return (
@@ -52,9 +65,17 @@ export default function QuestionCard({
       <div className='space-y-3'>
         {question.answers.map((answer, index) => {
           const isSelected = selectedAnswerId === answer.id;
-          const isCorrect =
-            isSelected && answer.id === question.correctAnswerId;
-          const isWrong = isSelected && answer.id !== question.correctAnswerId;
+          const isRightOption = answer.id === question.correctAnswerId;
+
+          // показываем зелёную подсветку:
+          // 1) если выбран верный; 2) если выбран неверный и надо подсветить правильный
+          const showAsCorrect =
+            (isSelected && isRightOption) ||
+            (!isSelected && isRightOption && revealCorrect);
+
+          // красную подсветку + shake — только на выбранном неверном
+          const showAsWrong = isSelected && !isRightOption;
+
           const isOptionDisabled = (isAnswered && !isSelected) || disabled;
 
           return (
@@ -62,8 +83,9 @@ export default function QuestionCard({
               key={answer.id}
               marker={String.fromCharCode(65 + index)}
               answer={answer.text}
-              isCorrect={isCorrect}
-              isWrong={isWrong}
+              isSelected={isSelected}
+              isCorrect={showAsCorrect}
+              isWrong={showAsWrong}
               onClick={() => handleSelectAnswer(answer.id)}
               disabled={isOptionDisabled}
             />

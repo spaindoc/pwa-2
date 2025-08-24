@@ -129,7 +129,7 @@ export default function FlashcardSlide({
       </div>
 
       {/* свайп-подсказка только на первом */}
-      {index === 0 && (
+      {index < 2 && (
         <div className='flex justify-center mb-[4.125rem]'>
           <SwipeIcon />
         </div>
