@@ -148,7 +148,7 @@ export default function FlashcardPage() {
                     <div
                       className={`absolute inset-0 ${
                         card.id === "f2" && active
-                          ? "bg-black/50"
+                          ? "bg-black/70"
                           : "bg-black/30"
                       }`}
                     />
